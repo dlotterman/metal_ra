@@ -6,6 +6,8 @@ This tool, given an Equinix Metal [organization](https://deploy.equinix.com/deve
 1. On-demand: Return the email address of any user in the org that has instances that have been provisioned for more than 15 days, and calculate the MRC of those instances provisioned for that time. That 15 days is a magic number in the code.
 2. Reserved: Return a list of projects where those projects have reservations older than 15 days, where the value of the project is determined by gathering the price of the reservation and adding 1 (many custom configurations return $0).
 
+These reports come in the format of a `.json` file and `.csv` file for both on-demand and reserved.
+
 * [Getting Started](docs/getting_started.md)
 
 ### Notes

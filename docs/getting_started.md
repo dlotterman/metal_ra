@@ -17,9 +17,11 @@ Your next steps depend on your prefered path:
 ### Python
 
 * `python -m venv .venv`
-* `pip install -r requirements.txt`
 * `source .venv/bin/activate`
+* `pip install -r requirements.txt`
 * `python metal_ra.py`
+
+Your results will be available in `/tmp/`.
 
 ### Docker / Podman
 
@@ -28,3 +30,11 @@ This guide assumes [podman](https://podman.io/), the native container runtime in
 * `mkdir /tmp/results`
 * `podman build . -t metal_ra`
 * `podman run -v /tmp/results/:/tmp/ -e METAL_ORG_ID -e METAL_AUTH_TOKEN metal_ra:latest`
+
+Your results will be in `/tmp/results/`
+
+#### NCB
+
+For a quick hosted environment for this work, launch an instance with [NCB](https://github.com/dlotterman/metal_code_snippets/tree/main/virtual_appliance_host/no_code_with_guardrails) and a `podman` environment should be available out of the gate.
+
+Note `podman` is available with native Enterprise Linux, `NCB` just makes it a little easier to say share the results by copying them to `/usr/share/nginx/html/` making them publically accessible. This will require sudo.
