@@ -14,11 +14,8 @@ import sys
 import datetime
 import time
 import os
-from slack_sdk import WebClient
-from slack_sdk.errors import SlackApiError
-
-
-# client = WebClient(token=slack_token)
+import json
+import csv
 
 AGE_LIMIT = 15
 
@@ -26,8 +23,9 @@ configuration = equinix_metal.Configuration(host="https://api.equinix.com/metal/
 
 
 def get_on_demand():
+    logger.info("starting on-demand report")
     instance_owners = {}
-    page_count_total = 3
+    page_count_total = 5
     page = 1
     reserved = False
     total_org_cost = 0
@@ -49,11 +47,15 @@ def get_on_demand():
                     )
                     api_response_dict = api_response.to_dict()
                     page_count_total = api_response_dict["meta"].get("last_page")
-                    logger.info(f"num pages in org devices list {page_count_total}")
-                    logger.info(f"page num {page}")
+                    # logger.info(f"num pages in org devices list {page_count_total}")
+                    # logger.info(f"page num {page}")
+                    if page % 5 == 0:
+                        logger.info(
+                            f"report at {page} of {page_count_total} devices in the org"
+                        )
                     page += 1
                     success = True
-                    time.sleep(10)
+                    time.sleep(2)
                 except equinix_metal.rest.ApiException as e:
                     logger.critical(f"Error{e}")
                 except Exception as err:
@@ -63,7 +65,6 @@ def get_on_demand():
                     attempts += 1
 
             for instance in api_response_dict.get("devices"):
-                logger.info(instance.get("hostname"))
                 instance_id = instance.get("id")
                 instance_age = datetime.datetime.now(
                     datetime.timezone.utc
@@ -72,7 +73,6 @@ def get_on_demand():
                 instance_metro_id = instance["metro"].get("id")
 
                 if instance_age.days < AGE_LIMIT:
-                    logger.warning(f"instance to new {instance_id}")
                     break
                 for available_metro in instance["plan"].get("available_in_metros"):
                     metro_href = available_metro.get("href")
@@ -115,10 +115,17 @@ def get_on_demand():
                     )
 
     logger.info(instance_owners)
+    with open("/tmp/ondemand_results.json", "w") as fp:
+        json.dump(instance_owners, fp)
+    with open("/tmp/ondemand_results.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, instance_owners.keys())
+        w.writeheader()
+        w.writerow(instance_owners)
     return instance_owners
 
 
 def get_reserved():
+    logger.info("starting reserved report")
     page_count_total = 2
     page = 1
 
@@ -126,6 +133,7 @@ def get_reserved():
     reservations = []
     old_reservations = []
     reserve_cost_per_project = []
+    org_project_results = {}
 
     while page < page_count_total:
         with equinix_metal.ApiClient(configuration) as api_client:
@@ -147,6 +155,21 @@ def get_reserved():
         project_costs = 0
 
         with equinix_metal.ApiClient(configuration) as api_client:
+
+            # ## get project name
+            project_details_instance = equinix_metal.ProjectsApi(api_client)
+            try:
+                project_details_api_response = (
+                    project_details_instance.find_project_by_id(project_id)
+                )
+                project_details_api_response_dict = (
+                    project_details_api_response.to_dict()
+                )
+                project_name = project_details_api_response_dict.get("name")
+            except Exception as err:
+                logger.critical(f"{type(err).__name__} was raised: {err}")
+
+            # ## get project hardware reserverations
             api_instance = equinix_metal.HardwareReservationsApi(api_client)
 
             try:
@@ -155,35 +178,40 @@ def get_reserved():
                 )
                 api_response_dict = api_response.to_dict()
                 for reservation in api_response_dict.get("hardware_reservations"):
-                    if reservation.get("device") is not None:
-                        reservation_age = datetime.datetime.now(
-                            datetime.timezone.utc
-                        ) - reservation.get("created_at")
-                        if reservation_age.days > AGE_LIMIT:
-                            new_cost = project_costs + round(
-                                reservation["plan"]["pricing"].get("year") / 12
-                            )
-                            project_costs = new_cost
+                    reservation_age = datetime.datetime.now(
+                        datetime.timezone.utc
+                    ) - reservation.get("created_at")
+                    if reservation_age.days > AGE_LIMIT:
+                        logger.warning(
+                            f"reservation: {reservation} is older than {AGE_LIMIT} days in project {project_name}"
+                        )
+                        new_cost = project_costs + round(
+                            reservation["plan"]["pricing"].get("year") / 12
+                        )
+                        new_cost += (
+                            1  # lazy way of making sure everything is at least a cost
+                        )
+                        project_costs = new_cost
                 if project_costs != 0:
-                    reserve_cost_per_project.append({project_id: project_costs})
+                    reserve_cost_per_project.append({project_name: project_costs})
+                    org_project_results.update({project_name: project_costs})
             except Exception as err:
                 logger.critical(f"{type(err).__name__} was raised: {err}")
 
-    logger.info(reserve_cost_per_project)
-
+    logger.info(org_project_results)
+    with open("/tmp/reserved_results.json", "w") as fp:
+        json.dump(org_project_results, fp)
+    with open("/tmp/reserved_results.csv", "w", newline="") as f:
+        w = csv.DictWriter(f, org_project_results.keys())
+        w.writeheader()
+        w.writerow(org_project_results)
     return reserve_cost_per_project
 
 
-def send_reserved_notification(reserved_audit):
-    logger.info("starting notification")
-
-
 def main():
-    logger.info("starting metal_ra")
+    logger.info(f"starting metal_ra for org {ORG_ID}")
     on_demand_audit = get_on_demand()
     reserved_audit = get_reserved()
-
-    send_reserved_notification(reserved_audit)
 
 
 if __name__ == "__main__":
@@ -210,7 +238,6 @@ if __name__ == "__main__":
         )
         sys.exit(1)
 
-    # slack_token = os.environ["SLACK_BOT_TOKEN"]
     configuration.api_key["x_auth_token"] = METAL_TOKEN
 
     main()
